@@ -1,0 +1,11 @@
+<div class="t">{{ _("No voucher account yet? In Sure:") }}</div>
+<ol>
+  <li>{{ _("<b>New account → Bank Account</b>, name <b>Ticket Restaurant</b>") | safe }}</li>
+  {% if r.opening %}
+  <li>{{ _("Balance on date <b>%(balance)s</b>, opening balance date <b>%(day)s</b>", balance=r.opening[0] | eur, day=r.opening[1].strftime('%d/%m/%Y')) | safe }}</li>
+  {% else %}
+  <li>{{ _("Balance and opening balance date: shown here after the first read from Edenred") }}</li>
+  {% endif %}
+</ol>
+{% if r.opening %}<p class="msg">{{ _("With this opening balance and the movements read, the account reaches %(balance)s, as on Edenred.", balance=r.opening[2] | eur) }}</p>{% endif %}
+<div class="row"><a class="btn sm" href="{{ sure_url }}/depositories/new" target="_blank" rel="noopener">{{ _("Open Sure ↗") }}</a><a class="btn sm ghost" href="{{ base }}/connections?open={{ r.c.id }}#c{{ r.c.id }}">{{ _("Refresh list") }}</a></div>

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% import "_groups.html" as G with context %}
+{% block head %}<style>{{ G.group_css }}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+</style>{% endblock %}
+{% block main %}
+<div class="top"><div><h1>{{ _("History") }}</h1><div class="sub">{{ _("Everything written to Sure or rejected, with the detail of each change.") }}</div></div></div>
+{% for g in groups %}{{ G.group_card(g, actions=False) }}{% else %}<div class="card empty">{{ _("Nothing yet.") }}</div>{% endfor %}
+{% if more %}<a class="btn" href="{{ base }}/history?page={{ page_no + 1 }}">{{ _("Older") }}</a>{% endif %}
+{% endblock %}

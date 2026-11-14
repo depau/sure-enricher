@@ -1,0 +1,37 @@
+# Runs next to an existing Sure. Put it in Sure's compose project (or attach it to Sure's network, see below) so
+# that SURE_URL=http://web:3000 works, and route https://<your-sure>/enrich to port 8790 in your reverse proxy.
+services:
+  enricher:
+    image: ghcr.io/depau/sure-enricher:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:////data/spe.db
+      SPE_RECEIPTS_DIR: /receipts
+      SPE_LOGIN_BROWSER_CDP: http://login-browser:9222
+    volumes:
+      - enricher-data:/data
+      - enricher-receipts:/receipts  # Esselunga receipt PDFs: user-<id>/esselunga-<connection>/<year>/<date>_<id>.pdf
+    ports:
+      - "127.0.0.1:8790:8790"  # the UI; publish it only to your reverse proxy
+    depends_on: [login-browser]
+    stop_grace_period: 90s
+    # networks: [default, sure]  # when Sure runs in another compose project
+
+  # Sign-ins happen here, shown to users inside /enrich. Never publish its port (9222): whoever reaches it controls it.
+  login-browser:
+    image: ghcr.io/depau/sure-enricher-login-browser:latest
+    restart: unless-stopped
+    shm_size: 256m
+    mem_limit: 1500m
+    tmpfs:
+      - /tmp:size=512m,uid=1000
+
+volumes:
+  enricher-data:
+  enricher-receipts:
+
+# networks:
+#   sure:
+#     external: true
+#     name: sure_default  # `docker network ls` shows the name of Sure's network

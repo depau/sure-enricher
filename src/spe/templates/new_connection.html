@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block head %}<style>
+.dlg{max-width:440px;padding:18px}
+.dlg h3{font-size:16px;font-weight:600}.dlg p{color:var(--muted);font-size:12.5px;margin:4px 0 14px}
+.mi{display:flex;align-items:center;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;width:100%;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.mi:hover{border-color:var(--fg)}.mi b{font-weight:600;font-size:13.5px;display:block}.mi b+span{color:var(--dim);font-size:12px}
+.ft{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--dim)}
+</style>{% endblock %}
+{% block main %}
+<form class="card dlg" method="post" action="{{ base }}/connections">
+  <h3>{{ _("Add connection") }}</h3><p>{{ _("You can connect several accounts of the same service: each has its own session and its own Sure accounts.") }}</p>
+  {% for key, ui in offered %}
+  <button class="mi" name="provider" value="{{ key }}"><span class="logo" style="background:{{ ui.color }}">{{ ui.name[0] }}</span><span><b>{{ _(ui.title) }}</b><span>{{ _(ui.pitch) }}</span></span></button>
+  {% endfor %}
+  <div class="ft"><span>{{ _("Passwords stay between you and the service.") }}</span><a class="btn sm ghost" href="{{ base }}/connections">{{ _("Cancel") }}</a></div>
+</form>
+{% endblock %}

@@ -1,0 +1,6 @@
+<div class="t">{{ _("Signing in to %(name)s", name=_(r.ui.name)) }}</div>
+{% if login_browser %}
+<p class="muted">{{ _("Sign in to <b>%(site)s</b> as you would on the site, from a browser that runs on the server and that you see here. Passwords and codes only go to the site; only the session stays here, encrypted.", site=r.ui.site) | safe }}</p>
+{% else %}
+<p class="muted">{{ _('The login browser is not set up on this server (<span class="mono">SPE_LOGIN_BROWSER_CDP</span>): ask whoever runs it.') | safe }}</p>
+{% endif %}

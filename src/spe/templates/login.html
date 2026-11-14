@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block head %}<style>
+.stepper{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:13px;flex-wrap:wrap}
+.sp{display:flex;align-items:center;gap:8px;color:var(--muted)}.sp .n{width:22px;height:22px;border-radius:50%;border:1px solid var(--line2);display:grid;place-items:center;font-size:12px}
+.sp.cur{color:var(--fg)}.sp.cur .n{background:var(--fg);color:#0B0B0C;border-color:var(--fg)}
+.line{width:40px;height:1px;background:var(--line2)}
+.browser{overflow:hidden;position:relative}
+.chrome{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+.chrome button{background:none;border:0;color:var(--muted);cursor:pointer;font-size:15px;padding:2px 6px}
+.url{flex:1;height:28px;border-radius:7px;background:var(--card2);display:flex;align-items:center;padding:0 10px;color:var(--muted);font-size:12.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}
+.live{font-size:11.5px;color:var(--dim);display:flex;align-items:center;gap:6px;white-space:nowrap}.live::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.live.on{color:var(--ok)}
+.page{position:relative;background:#fff;line-height:0;outline:none}
+.page img{width:100%;display:block;cursor:default;user-select:none;-webkit-user-drag:none;touch-action:none}
+.busy{position:absolute;left:0;right:0;top:0;height:3px;overflow:hidden;opacity:0;transition:opacity .2s;z-index:2;pointer-events:none}
+.busy.on{opacity:1}.busy::before{content:"";position:absolute;top:0;bottom:0;width:30%;background:var(--ok);animation:busy 1.1s ease-in-out infinite}
+@keyframes busy{from{left:-30%}to{left:100%}}
+@media (prefers-reduced-motion:reduce){.busy::before{animation:none;width:100%;left:0;opacity:.6}}
+.page .wait{position:absolute;inset:0;display:grid;place-items:center;color:#71717A;font-size:13px;line-height:1.4;pointer-events:none}
+.sink{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;resize:none}
+.toast{position:absolute;left:50%;top:16px;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line2);border-radius:9px;padding:8px 12px;font-size:12.5px;line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,.45);transition:opacity .2s;opacity:0;pointer-events:none}
+.toast.on{opacity:1}
+.tools{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line);background:var(--panel);font-size:12.5px;color:var(--muted);position:relative;flex-wrap:wrap}
+kbd{font:500 11.5px "Geist Mono",monospace;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:1px 6px;color:var(--fg);background:var(--card2)}
+.tools .sp2{flex:1}
+.pop{position:absolute;right:12px;bottom:50px;width:360px;max-width:calc(100% - 24px);padding:14px;z-index:3;box-shadow:0 18px 40px rgba(0,0,0,.5);background:var(--card2)}
+.pop b{font-weight:600;font-size:13px}.pop p{color:var(--muted);font-size:12px;margin:3px 0 10px}
+.pop .to{font-size:12px;color:var(--muted);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pop .to b{color:var(--fg);font-weight:500;font-size:12px}
+.pop input:focus{outline:none;border-color:var(--fg)}
+.pop .row{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:var(--dim)}.pop .row span{flex:1}
+.bar{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.note{font-size:12px;color:var(--dim);max-width:560px;line-height:1.5}
+.bar .pill{margin-left:auto}
+</style>{% endblock %}
+{% block main %}
+<div class="top"><div><h1 style="display:flex;align-items:center;gap:10px"><span class="logo" style="background:{{ ui.color }};width:24px;height:24px">{{ ui.name[0] }}</span> {{ _("Reconnect %(name)s", name=_(ui.name)) }}{% if c.label %} <span class="muted" style="font-size:15px;font-weight:400">· {{ c.label }}</span>{% endif %}</h1></div>
+  <form method="post" action="{{ base }}/connections/{{ c.id }}/login/cancel"><button class="btn ghost">{{ _("✕ Cancel") }}</button></form></div>
+<div class="stepper"><span class="sp cur"><span class="n">1</span> {{ _("Sign in as you would on the site") }}</span><span class="line"></span><span class="sp"><span class="n">2</span> {{ _("Import the session") }}</span><span class="line"></span><span class="sp"><span class="n">3</span> {{ _("The browser is closed and erased") }}</span></div>
+
+<div class="card browser">
+  <div class="chrome"><button type="button" id="back" title="{{ _('Back') }}" aria-label="{{ _('Back') }}">←</button><button type="button" id="reload" title="{{ _('Reload') }}" aria-label="{{ _('Reload') }}">↻</button>
+    <span class="url" id="url">…</span><span class="live" id="live">{{ _("connecting") }}</span></div>
+  <div class="page" id="page">
+    <div class="busy" id="busy" role="progressbar" aria-label="{{ _('The site is loading') }}"></div>
+    <img id="screen" alt="{{ _('Login browser') }}" draggable="false">
+    <div class="wait" id="wait">{{ _("Opening the browser…") }}</div>
+    <textarea class="sink" id="sink" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="{{ _('Login browser keyboard') }}"></textarea>
+    <div class="toast" id="toast" role="status"></div>
+  </div>
+  <div class="tools">
+    <span><kbd>{{ '⌘' }}</kbd> <kbd>V</kbd> {{ _("paste into the selected field") }}</span>
+    <span class="sp2"></span>
+    <button type="button" class="btn sm" id="pasteBtn" aria-expanded="false">{{ _("Paste text…") }}</button>
+    <button type="button" class="btn sm ghost" id="kbd">{{ _("Keyboard") }}</button>
+    <form class="card pop" id="pop" hidden>
+      <b>{{ _("Paste into the login browser") }}</b>
+      <p>{{ _("Fill it with your password manager.") }}</p>
+      <div class="to">{{ _("Goes into the field") }} <b id="popField">{{ _("selected in the browser") }}</b></div>
+      <input type="text" id="popText" autocomplete="username" aria-label="{{ _('Text to paste') }}">
+      <div class="row"><span>{{ _("It isn't saved anywhere.") }}</span><button class="btn sm pri" id="popSend">{{ _("Send") }}</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="bar">
+  <div class="note">{{ _("What you type or paste only reaches the login browser, through Enrich. It isn't logged or saved: only the session is kept, encrypted, after you sign in.") }}</div>
+  <span class="pill" id="state">{{ _("Waiting for sign-in…") }}</span>
+  <form method="post" action="{{ base }}/connections/{{ c.id }}/login/import"><button class="btn pri">{{ _("Import session") }}</button></form>
+</div>
+
+<script>
+(() => {
+  // UI strings for this script, translated server-side; %(name)s placeholders filled by t()
+  const T = {{ js_strings | tojson }};
+  const t = (s, v = {}) => (T[s] || s).replace(/%\((\w+)\)s/g, (_, k) => v[k] ?? "");
+  const $ = (id) => document.getElementById(id);
+  const screen = $("screen"), page = $("page"), sink = $("sink"), toast = $("toast"), live = $("live");
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}{{ base }}/connections/{{ c.id }}/login/ws`);
+  let size = { w: 1, h: 1 }, field = null, toastTimer, busyTimer;
+  const setBusy = (on) => { $("busy").classList.toggle("on", on); if (ws.readyState === 1) live.textContent = on ? t("loading…") : t("live"); };
+  const CURSORS = new Set(["default", "pointer", "text", "vertical-text", "move", "grab", "grabbing", "not-allowed", "no-drop", "wait",
+    "progress", "help", "crosshair", "cell", "copy", "alias", "zoom-in", "zoom-out", "col-resize", "row-resize", "ew-resize", "ns-resize",
+    "nesw-resize", "nwse-resize", "n-resize", "s-resize", "e-resize", "w-resize", "ne-resize", "nw-resize", "se-resize", "sw-resize", "all-scroll"]);  // never "none": the pointer must stay visible
+  const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
+  const mods = (e) => ({ alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey });
+  const say = (text) => { toast.textContent = text; toast.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("on"), 2500); };
+
+  ws.onopen = () => { live.textContent = t("live"); live.classList.add("on"); };
+  ws.onclose = () => { live.textContent = t("disconnected: reload the page"); live.classList.remove("on"); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.t === "frame") { screen.src = "data:image/jpeg;base64," + m.data; size = { w: m.w, h: m.h }; $("wait")?.remove(); }
+    else if (m.t === "url") $("url").textContent = m.value || "";
+    else if (m.t === "loading") {
+      // a long-polling request would otherwise keep it on forever
+      clearTimeout(busyTimer); if (m.value) busyTimer = setTimeout(() => setBusy(false), 15000);
+      setBusy(m.value);
+    }
+    else if (m.t === "imported") { say(t("Signed in: session imported")); $("state").textContent = t("Session imported"); $("state").classList.add("ok"); setTimeout(() => location.assign("{{ base }}/connections?open={{ c.id }}#c{{ c.id }}"), 1200); }
+    else if (m.t === "dialog") say(t("The site showed a notice (confirmed): %(text)s", { text: m.value }));
+    else if (m.t === "blocked") say(t("Blocked %(host)s: only %(name)s sites can be opened here", { host: m.value, name: {{ _(ui.name) | tojson }} }));
+    else if (m.t === "cursor") screen.style.cursor = CURSORS.has(m.value) ? m.value : "default";
+    else if (m.t === "focus" && m.value) {
+      field = m.value.label; $("popField").textContent = field ? `«${field}»` : t("selected in the browser");
+      // Same kind of field as the remote one, so a password manager offers the right thing (and passwords stay masked).
+      $("popText").type = m.value.secret ? "password" : "text";
+      $("popText").autocomplete = m.value.secret ? "current-password" : "username";
+      // Mirror the remote selection into the focused textarea and select it: the native Ctrl+C / ⌘C / Edit › Copy
+      // then copies it, on any OS, without asking for clipboard permissions. Typing replaces it, as in the page.
+      if (document.activeElement === sink) { sink.value = m.value.selection; sink.select(); }
+    }
+  };
+
+  const at = (e) => { const r = screen.getBoundingClientRect(); return { x: (e.clientX - r.left) * size.w / r.width, y: (e.clientY - r.top) * size.h / r.height }; };
+  const button = (e) => ["left", "middle", "right"][e.button] || "none";
+  let lastMove = 0;
+  screen.addEventListener("pointerdown", (e) => { e.preventDefault(); sink.focus({ preventScroll: true }); screen.setPointerCapture(e.pointerId);
+    send({ t: "mouse", type: "mousePressed", ...at(e), button: button(e), buttons: e.buttons, clicks: e.detail || 1, ...mods(e) }); });
+  screen.addEventListener("pointerup", (e) => send({ t: "mouse", type: "mouseReleased", ...at(e), button: button(e), buttons: e.buttons, clicks: e.detail || 1, ...mods(e) }));
+  screen.addEventListener("pointermove", (e) => { const now = performance.now(); if (now - lastMove < 40 && !e.buttons) return; lastMove = now;
+    send({ t: "mouse", type: "mouseMoved", ...at(e), button: e.buttons ? "left" : "none", buttons: e.buttons, ...mods(e) }); });
+  screen.addEventListener("wheel", (e) => { e.preventDefault(); send({ t: "wheel", ...at(e), dx: e.deltaX, dy: e.deltaY }); }, { passive: false });
+  screen.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // Every key lands in a hidden textarea: printable text (typing, IME, phone keyboards, pastes) arrives as input
+  // and is inserted as text; keys that edit or move (Backspace, Enter, Tab, arrows...) are sent as key presses.
+  const special = new Set(["Backspace", "Delete", "Enter", "Tab", "Escape", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+  const key = (e, down) => send({ t: "key", down, key: e.key, code: e.code, keyCode: e.keyCode, ...mods(e) });
+  // Shortcut modifier: ⌘ on Apple devices, Ctrl elsewhere. C and V stay native (copy the mirrored selection, paste);
+  // X is native too (copies) and also cuts in the page; A, Z, Y become editing commands in the page.
+  const apple = /Mac|iPhone|iPad/.test(navigator.platform);
+  const COMMAND = { a: "selectAll", z: "undo", y: "redo", x: "cut" };
+  sink.addEventListener("keydown", (e) => {
+    const shortcut = (apple ? e.metaKey : e.ctrlKey) && e.key.length === 1;
+    const k = e.key.toLowerCase(), command = shortcut ? (k === "z" && e.shiftKey ? "redo" : COMMAND[k]) : null;
+    if (command) { if (k !== "x") e.preventDefault(); send({ t: "key", down: true, key: e.key, code: e.code, keyCode: e.keyCode, command, ...mods(e) }); return; }
+    if (special.has(e.key)) { e.preventDefault(); key(e, true); }
+    else if (shortcut && k !== "c" && k !== "v") e.preventDefault();  // e.g. Ctrl+S would act on this page
+  });
+  sink.addEventListener("keyup", (e) => {
+    const shortcut = (apple ? e.metaKey : e.ctrlKey) && e.key.length === 1;
+    if (special.has(e.key) || (shortcut && COMMAND[e.key.toLowerCase()])) key(e, false);
+  });
+  sink.addEventListener("input", (e) => {
+    if (e.isComposing) return;
+    if (sink.value) send({ t: "text", text: sink.value });
+    if (e.inputType === "deleteByCut") { sink.value = ""; return; }  // the page cuts on its own (command "cut")
+    if (e.inputType === "insertFromPaste") say(t("Pasted%(where)s · %(n)s characters", { where: field ? t(" into the %(field)s field", { field }) : "", n: sink.value.length }));
+    sink.value = "";
+  });
+  sink.addEventListener("compositionend", () => { if (sink.value) send({ t: "text", text: sink.value }); sink.value = ""; });
+
+  if (!apple) document.querySelector(".tools kbd").textContent = "Ctrl";
+  $("back").onclick = () => { send({ t: "back" }); sink.focus({ preventScroll: true }); };
+  $("reload").onclick = () => { send({ t: "reload" }); sink.focus({ preventScroll: true }); };
+  // Typing goes to whatever the site focused (e.g. Amazon's email field) without clicking into the view first.
+  sink.focus({ preventScroll: true });
+  $("kbd").onclick = () => sink.focus();
+  const pop = $("pop");
+  $("pasteBtn").onclick = () => { pop.hidden = !pop.hidden; $("pasteBtn").setAttribute("aria-expanded", String(!pop.hidden)); if (!pop.hidden) $("popText").focus(); };
+  const deliver = (thenEnter) => {
+    const text = $("popText").value;
+    if (text) { send({ t: "text", text }); say(t("Sent%(where)s · %(n)s characters", { where: field ? t(" to the %(field)s field", { field }) : "", n: text.length })); }
+    if (thenEnter) for (const down of [true, false]) send({ t: "key", down, key: "Enter", code: "Enter", keyCode: 13 });
+    $("popText").value = ""; pop.hidden = true; $("pasteBtn").setAttribute("aria-expanded", "false"); sink.focus();
+  };
+  // Enter in the box means Enter on the site too (send and submit, as after typing there); the button only sends.
+  $("popText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); deliver(true); } });
+  pop.onsubmit = (e) => { e.preventDefault(); deliver(false); };
+})();
+</script>
+{% endblock %}

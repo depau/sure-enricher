@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "_groups.html" as G with context %}
+{% block head %}<style>{{ G.group_css }}
+.chips{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);font-size:13px;font-weight:500}
+.chip.on{background:var(--card2);color:var(--fg)}.chip .c{color:var(--dim)}.chip .logo{width:16px;height:16px;font-size:9px}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+</style>{% endblock %}
+{% block main %}
+<div class="top">
+  <div><h1>{{ _("To approve") }}</h1><div class="sub" style="max-width:600px">{{ _("Nothing is written to Sure until you approve. Product categories are then set by Sure's classifier.") }}</div></div>
+  {% if shown %}<form method="post" action="{{ base }}/ops/bulk">{% for g in shown %}{% for i in g.ids %}<input type="hidden" name="id" value="{{ i }}">{% endfor %}{% endfor %}
+    <button class="btn pri" name="action" value="approve">{{ _("Approve all (%(n)s)", n=shown | length) }}</button></form>{% endif %}
+</div>
+{% if chips | length > 1 %}
+<div class="chips">
+  <a class="chip {{ 'on' if not provider }}" href="{{ base }}/review">{{ _("All") }} <span class="c">{{ groups | length }}</span></a>
+  {% for p, n in chips %}<a class="chip {{ 'on' if p == provider }}" href="{{ base }}/review?provider={{ p }}">{{ G.logo(p) }}{{ _(providers[p].name) if p in providers else p }} <span class="c">{{ n }}</span></a>{% endfor %}
+</div>
+{% endif %}
+{% for g in shown %}{{ G.group_card(g) }}{% else %}<div class="card empty">{{ _("Nothing to approve.") }}</div>{% endfor %}
+{% if failed %}
+<h2 id="failed">{{ _("Failed changes") }}</h2>
+{% for g in failed %}{{ G.group_card(g) }}{% endfor %}
+{% endif %}
+{% endblock %}

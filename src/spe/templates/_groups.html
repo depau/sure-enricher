@@ -1,0 +1,69 @@
+{% macro logo(provider) %}{% set ui = providers.get(provider) %}<span class="logo" style="background:{{ ui.color if ui else '#3F3F46' }}">{{ (ui.name if ui else provider)[0] }}</span>{% endmacro %}
+
+{% macro group_card(g, actions=True) %}
+<div class="card p" id="g{{ g.ids[0] }}">
+  <div class="ph">
+    {% if not actions %}<span class="when">{{ g.at | when }}</span>{% endif %}
+    {{ logo(g.provider) }}
+    <div><div class="ttl">{{ g.title }}</div>{% if g.meta %}<div class="meta">{{ g.meta }}</div>{% endif %}</div>
+    {% if g.total is not none %}<div class="tot"><b class="num">{{ g.total | eur }}</b>{% if g.total_note %}<div>{{ g.total_note }}</div>{% endif %}</div>{% endif %}
+    {% if actions %}
+    <form class="acts" method="post" action="{{ base }}/ops/bulk">
+      {% for i in g.ids %}<input type="hidden" name="id" value="{{ i }}">{% endfor %}
+      {% if g.status == 'failed' %}<button class="btn sm" name="action" value="retry">{{ _("Retry") }}</button>
+      {% else %}<button class="btn sm" name="action" value="reject">{{ _("Reject") }}</button><button class="btn sm pri" name="action" value="approve">{{ _("Approve") }}</button>{% endif %}
+    </form>
+    {% else %}<span class="pill {{ {'done': 'ok', 'failed': 'bad', 'rejected': ''}.get(g.status, 'warn') }}">{{ _({"done": "Written", "failed": "Failed", "rejected": "Rejected", "approved": "Writing", "sending": "Writing"}.get(g.status, "Mixed")) }}</span>{% endif %}
+  </div>
+  {% if not actions %}<details class="more"><summary>{{ _("details") }}</summary>{% endif %}
+  {% if g.legs %}
+  <div class="legs">
+    {% for leg in g.legs %}
+    <div class="leg">
+      <div class="lh"><span class="acc">{{ leg.account }}</span><span class="tx">· {% if leg.date %}{{ leg.date[8:10] }}/{{ leg.date[5:7] }} {% endif %}{{ leg.tx }}</span>{% if leg.amount is not none %}<span class="amt num">{{ leg.amount | eur }}</span>{% endif %}</div>
+      <div class="chg">
+        {% if leg.resplit %}<b>{{ _.n("Add merchant %(merchant)s and tags to the product already split", "Add merchant %(merchant)s and tags to the %(n)s products already split", leg.products | length, merchant=leg.merchant) }}</b>
+        {% elif leg.products %}<b>{{ _.n("Split into 1 product", "Split into %(n)s products", leg.products | length) }}</b>{% if leg.merchant %}{{ _(" · merchant %(merchant)s", merchant=leg.merchant) }}{% endif %}{% endif %}
+        {% if leg.category %}<b>{{ _("Category from the purchase") }}</b>{% endif %}
+        {% if leg.merchant and not leg.products %}<b>{{ _("Merchant %(merchant)s", merchant=leg.merchant) }}</b>{% endif %}
+        {% if leg.notes %}<details class="diff"><summary>{{ _("notes") }}</summary><pre>{{ leg.notes }}</pre></details>{% endif %}
+      </div>
+      {% if leg.products %}
+      <div class="prods">{% for p in leg.products %}<div class="pr"><span>{{ p.name }}{% if p.part %} <span class="part">{{ _("part") }}</span>{% endif %}{% if p.excluded %} <span class="part">{{ _("excluded") }}</span>{% endif %}</span><span class="num">{{ p.amount | eur }}</span></div>{% endfor %}</div>
+      {% if leg.amount is not none %}<div class="lf"><span>{{ _("Products total") }}</span><span class="num {{ '' if leg.products_sum == leg.amount else 'bad' }}">{{ leg.products_sum | eur }} {{ _("= transaction") if leg.products_sum == leg.amount else _("≠ transaction") }}</span></div>{% endif %}
+      {% endif %}
+      {% if not actions and leg.tx_id %}<a class="open" href="{{ base }}/open/{{ leg.tx_id }}" target="_blank" rel="noopener">{{ _("Open in Sure ↗") }}</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% for m in g.minis %}<div class="mini">{{ m }}</div>{% endfor %}
+  {% if not actions %}</details>{% endif %}
+  {% for o in g.ops if o.error %}<div class="why bad">{{ o.error }}</div>{% endfor %}
+</div>
+{% endmacro %}
+
+{% set group_css %}
+.p{margin-bottom:12px;overflow:hidden}
+.ph{display:flex;align-items:center;gap:12px;padding:14px 16px}
+.ph .ttl{font-weight:600}.ph .meta{color:var(--muted);font-size:12.5px;margin-top:1px}
+.ph .tot{margin-left:auto;text-align:right}.ph .tot b{font-size:18px;font-weight:600}.ph .tot div{font-size:12px;color:var(--muted)}
+.ph .acts{display:flex;gap:6px;margin-left:18px}.ph>.pill{margin-left:18px}
+.legs{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));border-top:1px solid var(--line)}
+.leg{padding:14px 16px}.leg+.leg{border-left:1px solid var(--line)}
+.lh{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-width:0}
+.lh .acc{font-weight:600;white-space:nowrap}.lh .tx{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lh .amt{margin-left:auto;font-weight:600}
+.chg{display:flex;align-items:flex-start;gap:12px;font-size:12.5px;color:var(--muted);margin-bottom:8px;flex-wrap:wrap}
+.chg b{color:var(--fg);font-weight:500}
+.chg .diff{margin-left:auto;color:var(--muted)}.chg .diff summary{text-decoration:underline;text-underline-offset:3px}.chg .diff[open]{flex-basis:100%;margin-left:0}
+.prods{border:1px solid var(--line);border-radius:9px;background:var(--panel);max-height:260px;overflow:auto}
+.pr{display:flex;justify-content:space-between;gap:12px;padding:5px 11px;font-size:12.5px;border-top:1px solid var(--line)}
+.pr:first-child{border-top:0}
+.part{font-size:10.5px;color:var(--warn);border:1px solid rgba(247,144,9,.35);border-radius:4px;padding:0 4px;margin-left:4px}
+.lf{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:8px}.lf .bad{color:var(--bad)}
+.mini{padding:12px 16px;border-top:1px solid var(--line);font-size:13px}
+.why{font-size:12px;color:var(--dim);padding:10px 16px;border-top:1px solid var(--line)}.why.bad{color:#FDA29B}
+.open{display:inline-block;margin-top:10px;color:var(--muted);font-size:12.5px}
+.ph .when{color:var(--dim);font-size:12px;width:84px;flex:none}
+.more>summary{padding:0 16px 12px 112px;color:var(--muted);font-size:12.5px;text-decoration:underline;text-underline-offset:3px}
+{% endset %}

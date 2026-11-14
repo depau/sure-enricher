@@ -1,0 +1,9 @@
+<div class="t">{{ _("No loan yet? In Sure:") }}</div>
+<ol>
+  <li>{{ _("<b>New account → Loan</b>, name <b>PayPal Pay in 3</b>") | safe }}</li>
+  <li>{{ _("Balance on date <b>0</b>, opening balance date <b>today</b>") | safe }}</li>
+  <li>{{ _("Subtype <b>Line of Credit</b>, original loan balance <b>0</b>") | safe }}</li>
+  <li>{{ _("Rate, term and insurance <b>empty</b>") | safe }}</li>
+</ol>
+<p class="msg">{{ _("Without a loan, plans only get a note.") }}</p>
+<div class="row"><a class="btn sm" href="{{ sure_url }}/loans/new" target="_blank" rel="noopener">{{ _("Open Sure ↗") }}</a><a class="btn sm ghost" href="{{ base }}/connections?open={{ r.c.id }}#c{{ r.c.id }}">{{ _("Refresh list") }}</a></div>

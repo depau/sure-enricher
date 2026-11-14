@@ -1,0 +1,13 @@
+{
+  "_comment": "Normalized VoucherMovement shape (spe.vouchers), NOT an Edenred API response. Synthetic data.",
+  "movements": [
+    {"wallet": "card", "booked_on": "2026-11-02", "amount": "160.00", "kind": "issuance", "description": "Accredito buoni datore di lavoro"},
+    {"wallet": "card", "occurred_at": "2026-11-03T18:42:00+01:00", "amount": "24.00", "kind": "redemption", "description": "ESSELUNGA MILANO"},
+    {"wallet": "card", "booked_on": "2026-11-04", "amount": "8.00", "kind": "redemption", "description": "BAR CENTRALE"},
+    {"wallet": "card", "booked_on": "2026-11-04", "amount": "8.00", "kind": "redemption", "description": "BAR CENTRALE"},
+    {"wallet": "card", "booked_on": "2026-11-05", "amount": "3.50", "kind": "refund", "description": "ESSELUNGA MILANO storno", "source_id": "R-1"},
+    {"wallet": "card", "booked_on": "2026-11-05", "amount": "3.50", "kind": "refund", "description": "ESSELUNGA MILANO storno", "source_id": "R-1"},
+    {"wallet": "card", "booked_on": "2026-11-06", "amount": "5.29", "kind": "expiry", "description": "Buoni scaduti"},
+    {"wallet": "card", "booked_on": "2026-11-12", "amount": "12.00", "kind": "redemption", "description": "PIZZERIA", "pending": true}
+  ]
+}
