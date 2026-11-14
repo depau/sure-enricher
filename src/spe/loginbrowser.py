@@ -6,7 +6,9 @@ sessions, and disposing the context afterwards erases everything the sign-in lef
 
 import json
 import re
+import socket
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from websockets.sync.client import connect
@@ -28,13 +30,21 @@ def ws_base(cdp_url: str) -> str:
     return cdp_url.replace("http", "ws", 1).rstrip("/")
 
 
+def by_ip(cdp_url: str) -> str:
+    """Chromium serves CDP (HTTP and websocket) only when Host is an IP or localhost, its DNS-rebinding guard; a
+    compose service name like login-browser is neither, so connect by address. ponytail: IPv4 names only."""
+    u = urlsplit(cdp_url)
+    return u._replace(netloc=socket.gethostbyname(u.hostname or "") + (f":{u.port}" if u.port else "")).geturl()
+
+
 class LoginTab:
     """One isolated sign-in: a fresh browser context with one tab. close() disposes all of it."""
 
     def __init__(self, cdp_url: str, url: str):
-        self.cdp_url = cdp_url
-        browser = httpx.get(f"{cdp_url}/json/version", timeout=10).json()["webSocketDebuggerUrl"]
-        self.browser_ws = re.sub(r"^ws://[^/]+", ws_base(cdp_url), browser)  # CDP reports its in-container address
+        self.cdp_url = by_ip(cdp_url)  # resolved per sign-in: the container's address changes when it restarts
+        version = httpx.get(f"{self.cdp_url}/json/version", timeout=10)
+        browser = version.raise_for_status().json()["webSocketDebuggerUrl"]
+        self.browser_ws = re.sub(r"^ws://[^/]+", ws_base(self.cdp_url), browser)  # CDP reports its in-container address
         self.context = _call(self.browser_ws, "Target.createBrowserContext", {})["browserContextId"]
         self.target = _call(self.browser_ws, "Target.createTarget", {"url": url, "browserContextId": self.context, "newWindow": True})["targetId"]
         window = _call(self.browser_ws, "Browser.getWindowForTarget", {"targetId": self.target})["windowId"]
