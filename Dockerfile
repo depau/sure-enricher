@@ -2,7 +2,7 @@ FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /usr/local/bin/uv
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock LICENSE ./
 RUN uv sync --frozen --no-dev --extra postgres --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev --extra postgres
