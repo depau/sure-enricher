@@ -6,7 +6,7 @@ COPY pyproject.toml uv.lock LICENSE ./
 RUN uv sync --frozen --no-dev --extra postgres --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev --extra postgres
-RUN useradd -u 1000 -m spe && mkdir /data && chown spe /data
+RUN useradd -u 1000 -m spe && mkdir /data /receipts && chown spe /data /receipts
 USER spe
 ENV DATABASE_URL=sqlite:////data/spe.db SPE_LISTEN=0.0.0.0:8790 PATH=/app/.venv/bin:$PATH
 VOLUME /data
