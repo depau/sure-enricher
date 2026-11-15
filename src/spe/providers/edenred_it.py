@@ -15,6 +15,7 @@ import json
 import re
 import time
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -122,22 +123,41 @@ class EdenredClient:
 
 
 def normalize(rows: list[dict]) -> list[VoucherMovement]:
-    """One movement per checkout: the portal lists every voucher of a payment as its own row."""
+    """One movement per checkout: the portal lists every voucher of a payment as its own row. A checkout is its
+    second, operation and shop, not its till: Edenred changes the till once a payment settles (seen 2026-11-15,
+    the same €64 under till 000014242 at night and 000290153 by morning). ponytail: two tills of one shop paying
+    in the same second become one movement, with the right total."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for r in rows:
         d = (r.get("elencoDettagli") or [{}])[0]
-        groups[(r["dataOperazione"], r["codOperazione"], d.get("eserCd"), d.get("termCd"))].append(r)
+        groups[(r["dataOperazione"], r["codOperazione"], d.get("eserCd"))].append(r)
     out = []
-    for (when, code, shop, term), rs in groups.items():
+    for (when, code, shop), rs in groups.items():
         at = datetime.strptime(when, "%d/%m/%Y %H:%M:%S").replace(tzinfo=ROME)
         amount = sum((Decimal(r["valBuono"]) * int(r.get("numBuoni") or 1) for r in rs), Decimal(0))
         desc = rs[0]["descOperazione"].removeprefix("Utilizzo BUONI/VOUCHER presso ").strip()
         kind = KINDS.get(code, Kind.OTHER)
         out.append(VoucherMovement(
             wallet=WALLET, booked_on=at.date(), amount=amount, kind=kind, description=desc,
-            source_id=f"{code}:{at:%Y%m%d%H%M%S}:{shop or '-'}:{term or '-'}", occurred_at=at,
+            source_id=f"{code}:{at:%Y%m%d%H%M%S}:{shop or '-'}", occurred_at=at,
             merchant=vouchers.merchant_name(desc) if kind != Kind.ISSUANCE else None,
         ))
+    return out
+
+
+def keep_first_ids(moves: list[VoucherMovement], known_keys: list[str]) -> list[VoucherMovement]:
+    """Movements already written under the older id, which ended with the till, keep that id (their key in Sure).
+    One written under two ids (the till changed between two reads) is already in Sure twice: not written again."""
+    older: dict[str, list[str]] = defaultdict(list)
+    for key in known_keys:
+        sid = key.removeprefix(f"id:{WALLET}:")
+        if sid.count(":") == 3:
+            older[sid.rsplit(":", 1)[0]].append(sid)
+    out = []
+    for m in moves:
+        ids = older.get(m.source_id or "", [])
+        if len(ids) <= 1:
+            out.append(replace(m, source_id=ids[0]) if ids else m)
     return out
 
 
@@ -182,7 +202,8 @@ class EdenredIT:
         balance = client.balance(acct)
         cfg = ctx.state.config or {}
         accounts = {WALLET: cfg["account_id"]} if cfg.get("account_id") else {}
-        summary = vouchers.stage(ctx.db, ctx.state, normalize(rows), accounts)
+        known = ctx.db.scalars(select(Evidence.key).filter_by(connection_id=ctx.state.id, kind="voucher_movement")).all()
+        summary = vouchers.stage(ctx.db, ctx.state, keep_first_ids(normalize(rows), list(known)), accounts)
         ctx.state.cursor = {**ctx.state.cursor, "last_success": today.isoformat(), "balance": str(balance)}
         mismatch = vouchers.balance_mismatch(ctx.db, ctx.sure, cfg.get("account_id"), balance, "Edenred")
         if mismatch:
