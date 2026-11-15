@@ -26,7 +26,7 @@ def edenred(db):
 
 def stage_all(db):
     """Stage with auto-apply, then approve the identical twins as a human would."""
-    vouchers.stage(db, edenred(db), movements(), ACCOUNTS, auto_apply=True)
+    vouchers.stage(db, edenred(db), movements(), ACCOUNTS)
     for op in db.scalars(select(SureOp).where(SureOp.status == "planned")):
         op.status = "approved"
     db.commit()
@@ -49,7 +49,7 @@ def test_keys_stable_across_refetch_and_representation():
 
 
 def test_twins_wait_for_approval_and_held_items_are_visible(db):
-    vouchers.stage(db, edenred(db), movements(), ACCOUNTS, auto_apply=True)
+    vouchers.stage(db, edenred(db), movements(), ACCOUNTS)
     statuses = sorted(op.status for op in db.scalars(select(SureOp)))
     assert statuses == ["approved"] * 3 + ["planned"] * 2
     issues = {e.issue for e in db.scalars(select(Evidence).where(Evidence.issue.is_not(None)))}
@@ -114,9 +114,9 @@ def test_validation_error_needs_a_human(db):
 
 def test_voucher_spending_gets_the_shop_as_merchant_and_older_rows_get_it_on_approval(db):
     sure = FakeSure()
-    lunch = VoucherMovement("card", date(2026, 11, 12), Decimal("8.00"), Kind.REDEMPTION, "LA PIADINERIA - MILANO", source_id="L1")
+    lunch = VoucherMovement("card", date(2026, 11, 12), Decimal("8.00"), Kind.REDEMPTION, "LA PIADINERIA - MILANO", source_id="L1", merchant="La Piadineria")
     topup = VoucherMovement("card", date(2026, 11, 1), Decimal("160.00"), Kind.ISSUANCE, "Ordine di BUONI/VOUCHER su CLOUD", source_id="T1")
-    vouchers.stage(db, edenred(db), [lunch, topup], ACCOUNTS, auto_apply=True)
+    vouchers.stage(db, edenred(db), [lunch, topup], ACCOUNTS)
     assert writer.apply(db, sure.client(), 1)["created"] == 2
     assert {r["name"]: (r["merchant"] or {}).get("name") for r in sure.rows} == {"LA PIADINERIA - MILANO": "La Piadineria",
                                                                                  "Ordine di BUONI/VOUCHER su CLOUD": None}
@@ -124,7 +124,7 @@ def test_voucher_spending_gets_the_shop_as_merchant_and_older_rows_get_it_on_app
     # rows created before merchants existed: one is still bare, another got a merchant by hand in Sure meanwhile
     old = VoucherMovement("card", date(2026, 10, 2), Decimal("24.00"), Kind.REDEMPTION, "ESSELUNGA - MILANO - CENTRO", source_id="E1")
     hand = VoucherMovement("card", date(2026, 10, 3), Decimal("8.00"), Kind.REDEMPTION, "TO MARKET - MILANO", source_id="M1")
-    vouchers.stage(db, edenred(db), [old, hand], ACCOUNTS, auto_apply=True)
+    vouchers.stage(db, edenred(db), [old, hand], ACCOUNTS)
     for op in db.scalars(select(SureOp).where(SureOp.status == "approved")):
         op.payload = {k: v for k, v in op.payload.items() if k != "merchant"}
     writer.apply(db, sure.client(), 1)

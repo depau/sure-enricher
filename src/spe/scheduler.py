@@ -129,7 +129,14 @@ class Scheduler:
             p = self.providers.get(c.provider)
             if p is not None and due(c, now()):
                 run_connection(db, sure, self.settings, p, c)
-        wallets = {c.config["account_id"] for c in conns if c.provider == "edenred_it" and (c.config or {}).get("account_id")}
+
+        def accounts(provider: str, key: str) -> set[str]:
+            return {c.config[key] for c in conns if c.provider == provider and (c.config or {}).get(key)}
+
+        # Voucher legs are always a wallet rail (none chosen: nothing matches); gift card legs only once an account holds them.
+        wallets = {purchases.VOUCHER: accounts("edenred_it", "account_id")}
+        if gift := accounts("amazon_it", "gift_card_account"):
+            wallets[purchases.GIFT_CARD] = gift
         try:
             purchases.reconcile(db, sure, wallets, user.id)
             purchases.backfill_split_metadata(db, user.id)

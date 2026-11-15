@@ -132,9 +132,11 @@ def normalize(rows: list[dict]) -> list[VoucherMovement]:
         at = datetime.strptime(when, "%d/%m/%Y %H:%M:%S").replace(tzinfo=ROME)
         amount = sum((Decimal(r["valBuono"]) * int(r.get("numBuoni") or 1) for r in rs), Decimal(0))
         desc = rs[0]["descOperazione"].removeprefix("Utilizzo BUONI/VOUCHER presso ").strip()
+        kind = KINDS.get(code, Kind.OTHER)
         out.append(VoucherMovement(
-            wallet=WALLET, booked_on=at.date(), amount=amount, kind=KINDS.get(code, Kind.OTHER), description=desc,
+            wallet=WALLET, booked_on=at.date(), amount=amount, kind=kind, description=desc,
             source_id=f"{code}:{at:%Y%m%d%H%M%S}:{shop or '-'}:{term or '-'}", occurred_at=at,
+            merchant=vouchers.merchant_name(desc) if kind != Kind.ISSUANCE else None,
         ))
     return out
 
@@ -180,25 +182,13 @@ class EdenredIT:
         balance = client.balance(acct)
         cfg = ctx.state.config or {}
         accounts = {WALLET: cfg["account_id"]} if cfg.get("account_id") else {}
-        summary = vouchers.stage(ctx.db, ctx.state, normalize(rows), accounts, bool(cfg.get("auto_apply")))
+        summary = vouchers.stage(ctx.db, ctx.state, normalize(rows), accounts)
         ctx.state.cursor = {**ctx.state.cursor, "last_success": today.isoformat(), "balance": str(balance)}
-        mismatch = self._check_balance(ctx, balance)
+        mismatch = vouchers.balance_mismatch(ctx.sure, cfg.get("account_id"), balance, "Edenred")
         if mismatch:
             ctx.state.status = "degraded"
             return f"{summary}; {mismatch}"
         return f"{summary}; Edenred balance €{balance}"
-
-    def _check_balance(self, ctx: Context, balance: Decimal) -> str | None:
-        account_id = (ctx.state.config or {}).get("account_id")
-        if not account_id:
-            return None
-        acct = next((a for a in ctx.sure.accounts() if a["id"] == account_id), None)
-        if acct is None:
-            return f"Sure account {account_id} not found"
-        in_sure = Decimal(acct["balance_cents"]) / 100
-        if in_sure != balance:
-            return f"Edenred says €{balance}, Sure shows €{in_sure}: approve pending ops or fix the opening balance"
-        return None
 
 
 def opening_balance(db: Session, conn: Connection) -> tuple[Decimal, date, Decimal] | None:

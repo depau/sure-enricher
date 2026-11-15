@@ -160,7 +160,7 @@ def _describe(db: Session, user_id: int, key: str, ops: list[SureOp], accounts: 
         note = tr("%(amount)s to pay", amount=money(p["remaining"])) if Decimal(p.get("remaining", "0")) else tr("paid")
     elif first.kind == "create":
         p = first.payload
-        title = tr("Edenred · new movement") if first.provider == "edenred_it" else tr("New transaction")
+        title = {"edenred_it": tr("Edenred · new movement"), "amazon_it": tr("Amazon gift card · new movement")}.get(first.provider, tr("New transaction"))
         meta = " · ".join(x for x in (_date(p.get("date")), p.get("name")) if x)
         total = Decimal(p["amount"]) if "amount" in p else None
         note = tr("expense") if p.get("nature") == "expense" else tr("income")
@@ -252,7 +252,9 @@ def held(db: Session, user_id: int, tr: Tr = EN) -> list[HeldItem]:
             title = purchase_title(ev, tr)
             meta, total = _date(p.get("date")) or (p.get("date") or ""), Decimal(p["total"]) if p.get("total") else None
         elif ev.kind == "voucher_movement":
-            title, meta = tr("Edenred · %(description)s", description=p.get("description", ev.key)), _date(p.get("booked_on"))
+            d = p.get("description", ev.key)
+            title = tr("Amazon gift card · %(description)s", description=d) if ev.provider == "amazon_it" else tr("Edenred · %(description)s", description=d)
+            meta = _date(p.get("booked_on"))
             total = Decimal(p["amount"]) if p.get("amount") else None
         else:
             title, meta = tr("Pay in 3 · %(merchant)s", merchant=p.get("merchant") or tr("purchase")), _date(p.get("date"))

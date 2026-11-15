@@ -80,7 +80,8 @@ PROVIDERS = {
     "esselunga": ProviderUI("Esselunga", "Esselunga", "Sign in in the login browser · in-store receipts", "in-store receipts",
                             "#0B5BA8", "esselunga.it"),
     "amazon_it": ProviderUI("Amazon", "Amazon (Europe)", "Sign in on amazon.it · orders from every European store (.it, .de, .fr, .es…)",
-                            "orders and refunds", "#FF9900", "amazon.it"),
+                            "orders and refunds", "#FF9900", "amazon.it",
+                            (Pick("gift_card_account", "Gift card account in Sure", "No gift card account", ("depository", "other_asset"), False),)),
     "aliexpress": ProviderUI("AliExpress", "AliExpress", "Sign in in the login browser · orders and refunds", "orders and refunds",
                              "#E62E04", "aliexpress.com"),
     "paypal_payin3": ProviderUI("PayPal Pay in 3", "PayPal Pay in 3", "No sign-in · choose the PayPal account and a loan",
@@ -257,11 +258,16 @@ def create_app(sched: Scheduler, auth: SureAuth) -> FastAPI:
             help_ = "help_edenred.html"
         elif c.provider == "paypal_payin3" and not cfg.get("loan_account"):
             help_ = "help_paypal.html"
+        elif c.provider == "amazon_it" and not cfg.get("gift_card_account") and "opening" in (c.cursor or {}).get("gift_card", {}):
+            help_ = "help_giftcard.html"
         else:
             help_ = None
+        opening = opening_balance(d, c) if help_ == "help_edenred.html" else None
+        if help_ == "help_giftcard.html":
+            gc = c.cursor["gift_card"]  # read once in full: the ledger's balance before its first row
+            opening = (Decimal(gc["opening"][0]), date.fromisoformat(gc["opening"][1]), Decimal(gc["balance"]))
         return {"c": c, "ui": ui, "badge": badge(c), "where": where, "when": f"{every} · {last}", "fields": fields,
-                "open": c.id == open_id, "reconnect": needs_login and can_import(c), "help": help_,
-                "opening": opening_balance(d, c) if help_ == "help_edenred.html" else None}
+                "open": c.id == open_id, "reconnect": needs_login and can_import(c), "help": help_, "opening": opening}
 
     def sure_accounts(user: User) -> tuple[dict[str, dict], str | None]:
         try:
@@ -315,8 +321,6 @@ def create_app(sched: Scheduler, auth: SureAuth) -> FastAPI:
                 if since:
                     date.fromisoformat(since)  # ValueError -> 500 is fine for a hand-crafted post
                 cfg["since"] = since
-            if c.provider == "edenred_it":
-                cfg["auto_apply"] = form.get("auto_apply") == "1"
             hours = int(form.get("interval_hours", c.interval_hours))
             if hours not in dict(INTERVALS):
                 raise HTTPException(422, "interval")
@@ -580,6 +584,8 @@ def create_app(sched: Scheduler, auth: SureAuth) -> FastAPI:
             linked, held = counts.get(True, 0), counts.get(False, 0)
             out |= {"big": str(linked + held), "unit": "receipts" if c.provider == "esselunga" else "orders",
                     "l1": tr("%(linked)s linked · %(held)s on hold", linked=linked, held=held) if held else tr("%(linked)s linked", linked=linked)}
+            if (c.config or {}).get("gift_card_account") and "balance" in cur.get("gift_card", {}):
+                out["l1"] += " · " + tr("gift card %(balance)s", balance=views.eur(cur["gift_card"]["balance"], tr))
         return out
 
     if not base:

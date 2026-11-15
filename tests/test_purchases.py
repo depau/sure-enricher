@@ -10,6 +10,7 @@ from spe.purchases import Line, LegMatch, Payment, Purchase
 
 EDENRED = "e0000000-0000-0000-0000-000000000000"
 CARD = "c0000000-0000-0000-0000-000000000000"
+WALLETS = {purchases.VOUCHER: {EDENRED}}
 
 
 def approve_and_apply(db, sure):
@@ -50,7 +51,7 @@ def test_esselunga_mixed_payment_becomes_product_entries_on_both_legs(db):
 
     purchases.record(db, conn(db, "esselunga"), esselunga_48())
     db.commit()
-    assert purchases.reconcile(db, sure.client(), {EDENRED}, 1) == "1/1 purchases linked"
+    assert purchases.reconcile(db, sure.client(), WALLETS, 1) == "1/1 purchases linked"
     ops = db.scalars(select(SureOp).order_by(SureOp.id)).all()
     assert [(o.kind, o.transaction_id) for o in ops] == [
         ("update", voucher_leg["id"]), ("split", voucher_leg["id"]), ("update", card_leg["id"]), ("split", card_leg["id"]),
@@ -64,7 +65,7 @@ def test_esselunga_mixed_payment_becomes_product_entries_on_both_legs(db):
     assert sure.spending({EDENRED, CARD}) == spending_before  # split parents are excluded, children carry the €48
     assert "R-2026-11-03-0042" in card_leg["notes"]
 
-    purchases.reconcile(db, sure.client(), {EDENRED}, 1)  # re-running plans nothing new
+    purchases.reconcile(db, sure.client(), WALLETS, 1)  # re-running plans nothing new
     assert db.scalar(select(SureOp).where(SureOp.status == "planned")) is None
 
 
@@ -76,7 +77,7 @@ def test_ambiguous_card_leg_waits_for_the_owner_to_pick_it(db):
     shop = conn(db, "esselunga")
     purchases.record(db, shop, esselunga_48())
     db.commit()
-    assert purchases.reconcile(db, sure.client(), {EDENRED}, 1) == "0/1 purchases linked"
+    assert purchases.reconcile(db, sure.client(), WALLETS, 1) == "0/1 purchases linked"
     ev = db.scalar(select(Evidence).filter_by(key="R-2026-11-03-0042"))
     assert ev.issue == "card €24.00: 2 candidates, needs review"
     assert db.scalar(select(SureOp)) is None
@@ -87,7 +88,7 @@ def test_ambiguous_card_leg_waits_for_the_owner_to_pick_it(db):
     purchases.record(db, shop, esselunga_48())
     db.commit()
     assert ev.payload["picks"] == {"1": second["id"]}
-    assert purchases.reconcile(db, sure.client(), {EDENRED}, 1) == "1/1 purchases linked"
+    assert purchases.reconcile(db, sure.client(), WALLETS, 1) == "1/1 purchases linked"
     touched = {o.transaction_id for o in db.scalars(select(SureOp))}
     assert second["id"] in touched and first["id"] not in touched
 
@@ -101,7 +102,7 @@ def test_ignored_purchase_is_left_alone(db):
     sure.add(EDENRED, "2026-11-03", "24.0", "ESSELUNGA MILANO")
     sure.add(CARD, "2026-11-04", "24.0", "ESSELUNGA SPA")
     db.commit()
-    assert purchases.reconcile(db, sure.client(), {EDENRED}, 1) == "nothing to reconcile"
+    assert purchases.reconcile(db, sure.client(), WALLETS, 1) == "nothing to reconcile"
 
 
 def test_unpaid_leg_keeps_purchase_held_and_nothing_written(db):
@@ -109,7 +110,7 @@ def test_unpaid_leg_keeps_purchase_held_and_nothing_written(db):
     sure.add(EDENRED, "2026-11-03", "24.0", "ESSELUNGA MILANO")
     purchases.record(db, conn(db, "esselunga"), esselunga_48())
     db.commit()
-    purchases.reconcile(db, sure.client(), {EDENRED}, 1)
+    purchases.reconcile(db, sure.client(), WALLETS, 1)
     assert db.scalar(select(Evidence).filter_by(key="R-2026-11-03-0042")).issue == "card €24.00: no Sure transaction yet"
     assert db.scalar(select(SureOp)) is None
 
@@ -128,7 +129,7 @@ def test_amazon_charges_spread_over_items_by_price(db):
     )
     purchases.record(db, conn(db, "amazon_it"), order)
     db.commit()
-    assert purchases.reconcile(db, sure.client(), set(), 1) == "1/1 purchases linked"
+    assert purchases.reconcile(db, sure.client(), {purchases.VOUCHER: set()}, 1) == "1/1 purchases linked"
     assert approve_and_apply(db, sure) == {"updated": 3, "split": 2}
     assert children(sure, first) == [("USB hub", "10.90", None), ("Libro", "29.10", None)]
     assert children(sure, second) == [("USB hub", "16.36", None), ("Libro", "43.64", None)]
@@ -142,7 +143,7 @@ def test_edit_in_sure_after_planning_is_not_overwritten(db):
     card_leg = sure.add(CARD, "2026-11-04", "24.0", "ESSELUNGA SPA")
     purchases.record(db, conn(db, "esselunga"), esselunga_48())
     db.commit()
-    purchases.reconcile(db, sure.client(), {EDENRED}, 1)
+    purchases.reconcile(db, sure.client(), WALLETS, 1)
     card_leg["notes"] = "my own note"  # owner edits in Sure before approving
     stats = approve_and_apply(db, sure)
     assert stats["failed"] == 2  # the card notes and its split both refuse
@@ -160,7 +161,7 @@ def test_split_children_carry_the_merchant_and_parent_tags_and_old_splits_get_th
     tagged = sure.add(EDENRED, "2026-11-03", "24.0", "ESSELUNGA MILANO", tags=[sure.tags[0]])
     card_leg = sure.add(CARD, "2026-11-04", "24.0", "ESSELUNGA SPA MILANO", merchant=sure.merchants[0])
     purchases.record(db, conn(db, "esselunga"), esselunga_48())
-    purchases.reconcile(db, sure.client(), {EDENRED}, 1)
+    purchases.reconcile(db, sure.client(), WALLETS, 1)
     approve_and_apply(db, sure)
     kids = [r for r in sure.rows if r.get("parent_id")]
     assert {r["merchant"]["name"] for r in kids} == {"Esselunga"}  # a family merchant, created once, not the bank's raw one

@@ -1,0 +1,8 @@
+<div class="t">{{ _("Gift card balance on Amazon: %(balance)s. To follow it in Sure:", balance=r.opening[2] | eur) }}</div>
+<ol>
+  <li>{{ _("<b>New account → Bank Account</b>, name <b>Amazon buoni regalo</b>") | safe }}</li>
+  <li>{{ _("Balance on date <b>%(balance)s</b>, opening balance date <b>%(day)s</b>", balance=r.opening[0] | eur, day=r.opening[1].strftime('%d/%m/%Y')) | safe }}</li>
+  <li>{{ _("Choose it above as the gift card account") }}</li>
+</ol>
+<p class="msg">{{ _("Every gift card movement is then written there without asking, and its balance is checked against Amazon's.") }}</p>
+<div class="row"><a class="btn sm" href="{{ sure_url }}/depositories/new" target="_blank" rel="noopener">{{ _("Open Sure ↗") }}</a><a class="btn sm ghost" href="{{ base }}/connections?open={{ r.c.id }}#c{{ r.c.id }}">{{ _("Refresh list") }}</a></div>

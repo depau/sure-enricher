@@ -20,7 +20,8 @@ from spe.sure import SureClient
 
 CENT = Decimal("0.01")
 VOUCHER = "edenred"  # payment method paid from the meal-voucher wallet
-NO_LEDGER = {"gift_card", "promo", "loyalty", "cash"}  # paid from balances Sure does not track: no leg to find
+GIFT_CARD = "gift_card"  # paid from the Amazon gift card balance
+NO_LEDGER = {GIFT_CARD, "promo", "loyalty", "cash"}  # paid from balances Sure does not track (unless a wallet account holds it)
 
 
 # The merchant split children get in Sure (a family merchant, created if missing), so rules can target them.
@@ -76,16 +77,18 @@ def _amount(tx: dict) -> Decimal:
     return Decimal(tx["amount_decimal"])
 
 
-def match(p: Purchase, txs: list[dict], voucher_accounts: set[str], claimed: set[str],
+def match(p: Purchase, txs: list[dict], wallets: dict[str, set[str]], claimed: set[str],
           picks: dict[str, str] | None = None) -> list[LegMatch]:
     """Deterministic: exact amount, date window, account rail; merchant keyword or a dedicated wallet makes it strong.
 
+    wallets: payment method -> the Sure accounts holding that balance (Edenred vouchers, Amazon gift card).
     picks: leg index (as a string) -> transaction id the owner chose among that leg's candidates (In sospeso).
     A pick only counts while that transaction is still a valid candidate.
     """
+    in_wallet = set().union(*wallets.values()) if wallets else set()
     out, taken = [], set(claimed)
     for i, pay in enumerate(p.payments):
-        if pay.method in NO_LEDGER:
+        if pay.method in NO_LEDGER and pay.method not in wallets:
             out.append(LegMatch(pay, strong=True))
             continue
         start = (pay.on or p.date) - timedelta(days=3)  # banks may date a card charge before the shop reports it
@@ -99,13 +102,13 @@ def match(p: Purchase, txs: list[dict], voucher_accounts: set[str], claimed: set
             and not t.get("excluded")
             and _amount(t) == pay.amount
             and start <= date.fromisoformat(t["date"]) <= end
-            and ((t["account"]["id"] in voucher_accounts) == (pay.method == VOUCHER))
+            and (t["account"]["id"] in wallets[pay.method] if pay.method in wallets else t["account"]["id"] not in in_wallet)
         ]
         named = [t for t in cands if any(k.casefold() in _label(t) for k in p.keywords)]
         picked = next((t for t in cands if t["id"] == (picks or {}).get(str(i))), None)
         if picked is not None:
             m = LegMatch(pay, picked, cands, strong=True)  # a human chose it
-        elif pay.method == VOUCHER and len(cands) == 1:
+        elif pay.method in wallets and len(cands) == 1:
             m = LegMatch(pay, cands[0], cands, strong=True)  # dedicated wallet: amount + date is enough
         elif len(named) == 1:
             m = LegMatch(pay, named[0], cands, strong=True)
@@ -208,7 +211,7 @@ def plan_ops(p: Purchase, legs: list[LegMatch]) -> list[dict]:
     return ops
 
 
-def reconcile(db: Session, sure: SureClient, voucher_accounts: set[str], user_id: int | None) -> str:
+def reconcile(db: Session, sure: SureClient, wallets: dict[str, set[str]], user_id: int | None) -> str:
     """Match the user's unlinked purchases against what they see in Sure and stage edits for approval."""
     every = db.scalars(select(Evidence).where(Evidence.user_id == user_id, Evidence.kind == "purchase")).all()
     pending = [ev for ev in every if "payments" in ev.payload and ev.issue and not ev.payload.get("ignored")]
@@ -226,7 +229,7 @@ def reconcile(db: Session, sure: SureClient, voucher_accounts: set[str], user_id
     for ev, p in purchases:
         if p.problems():
             continue  # its issue already says why
-        legs = match(p, txs, voucher_accounts, claimed - links[ev.id], ev.payload.get("picks"))
+        legs = match(p, txs, wallets, claimed - links[ev.id], ev.payload.get("picks"))
         missing = [leg for leg in legs if not leg.strong]
         if missing:
             ev.issue = "; ".join(

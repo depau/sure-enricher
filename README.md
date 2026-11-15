@@ -6,12 +6,14 @@ fills in what your bank feed doesn't know:
 - **What you bought.** Esselunga receipts, Amazon (all European stores) and AliExpress orders are matched to the
   card charges Sure already has, and each charge is split into its products, so Sure's own classifier and your
   rules can categorize them.
-- **Meal vouchers.** Edenred Ticket Restaurant (Italy) movements are written to a voucher account in Sure, one
-  transaction per checkout, with the shop as merchant; the balance is checked against Edenred's.
+- **Meal vouchers and gift cards.** Edenred Ticket Restaurant (Italy) movements are written to a voucher account in
+  Sure, one transaction per checkout, with the shop as merchant; the Amazon gift card balance's movements go to a
+  gift card account, and pay their orders next to the card. Both balances are checked against the source's.
 - **PayPal Pay in 3.** Plans are detected in the PayPal account Sure syncs; optionally the debt goes to a Loan
   account and the spending is spread over the instalments.
 
-Nothing is written to Sure until you approve it. Users sign in with their Sure account; each one has their own
+Nothing is written to Sure until you approve it, except new movements in the wallet accounts the enricher keeps
+(Edenred vouchers, Amazon gift card). Users sign in with their Sure account; each one has their own
 connections and only touches what they can see in Sure. The UI is in English and Italian (it follows the language
 of your Sure family).
 
@@ -21,7 +23,7 @@ of your Sure family).
 | --- | --- | --- |
 | Edenred Ticket Restaurant Italia | working (verified on a real account) | sign-in once, then a refresh token over plain HTTP |
 | Esselunga | working (verified on a real account) | session cookies; receipt PDFs parsed, optionally archived |
-| Amazon (Europe) | working on amazon.it, which lists every EU store's orders | session cookies; payments page + order details |
+| Amazon (Europe) | working on amazon.it, which lists every EU store's orders; gift card ledger verified on a real account (test Sure) | session cookies; payments page + order details + gift card balance page |
 | AliExpress | working (verified on a real account) | session cookies; AliExpress's own signed order API |
 | PayPal Pay in 3 | working; debt writeback validated on a test Sure | no PayPal login: reads the PayPal account in Sure |
 
@@ -80,9 +82,9 @@ Migrations run on startup. Back up the data volume (or `pg_dump`) before upgradi
 - **On hold**: what isn't in Sure yet and why. When a payment matches several transactions, pick the right one.
 - **History**: every write, with a link to the transaction in Sure.
 
-Sure can't create accounts through its API, so the voucher account (Edenred) and the optional Pay in 3 loan are
-created by hand in Sure; Connections shows the exact values to type, including the opening balance that makes the
-voucher account land on Edenred's balance.
+Sure can't create accounts through its API, so the voucher account (Edenred), the gift card account (Amazon) and the
+optional Pay in 3 loan are created by hand in Sure; Connections shows the exact values to type, including the
+opening balance that makes the wallet account land on the source's balance.
 
 ## Users and administration
 
@@ -106,14 +108,15 @@ Health: `GET /healthz` (liveness) and `GET /readyz` (database and scheduler), at
 ## How it stays safe with your money
 
 - **Approval first.** Every Sure mutation is queued (`planned → approved → sending → done`) with what it saw
-  before; applying refuses if the transaction changed in the meantime. Only Edenred movements can be set to apply
-  without asking, per connection.
+  before; applying refuses if the transaction changed in the meantime. New movements in the wallet accounts the
+  enricher keeps (Edenred, Amazon gift card) are written without asking; edits, and anything touching other
+  accounts, always ask.
 - **No duplicates.** Created transactions carry `source` + a stable `external_id`, which Sure deduplicates on; an op
   that may have landed (crash, timeout) is looked up before it is resent.
 - **The bank is the truth.** Amounts and dates come from the bank transactions; the enricher adds notes, merchant,
   tags and product splits, and never books a purchase total as an extra expense.
-- **Deterministic matching.** Exact amount, a date window, the right account (voucher wallet or not), not already
-  claimed, and the merchant's name on the charge. Anything ambiguous waits in On hold for you.
+- **Deterministic matching.** Exact amount, a date window, the right account (voucher or gift card wallet or not),
+  not already claimed, and the merchant's name on the charge. Anything ambiguous waits in On hold for you.
 - **Hands off your edits.** Transactions you edited (`user_modified`) or split yourself are left alone; a merchant
   you chose is never replaced.
 - **Contained sign-ins.** Each sign-in runs in its own browser profile, erased afterwards. While you use it, the tab
@@ -146,8 +149,15 @@ Health: `GET /healthz` (liveness) and `GET /readyz` (database and scheduler), at
 - One connection signed in on amazon.it covers the whole European account: its payments page lists every EU
   store's charges, and amazon.it shows the details of orders placed on the others. Orders are labelled with their
   store; dates and prices are read in any EU store's language.
-- One order = one purchase whose legs are its real card charges (per shipment, per instalment, refunds); each
-  charge is spread over the order's items in proportion to their prices.
+- One order = one purchase whose legs are its real card charges (per shipment, per instalment, refunds) and its gift
+  card payments; each leg is spread over the order's items in proportion to their prices.
+- With a gift card account chosen, every row of the gift card ledger (`/gc/balance`, the whole history on the
+  first read, then three weeks back) becomes a transaction there: spent on an order (expense); refunds, released
+  holds and balance added (a redeemed code, a reload) as income. Sure itself pairs a top-up with the card payment
+  that bought it as a transfer. The ledger's running balance must add up row by row and end on Amazon's balance,
+  or nothing is written. Gift card payments of orders from the last 60 days become legs of those orders; reload
+  orders are not purchases. Wordings not seen yet on the ledger are held, not guessed.
+- Amazon sometimes answers 503 to a session that read many pages; the connection then waits for its next sync.
 
 ### AliExpress
 

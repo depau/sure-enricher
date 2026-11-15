@@ -55,10 +55,6 @@
       {% if c.provider == 'paypal_payin3' %}
       <label class="fld"><div class="k">{{ _("Only plans opened from") }}</div><input type="date" name="since" value="{{ c.config.get('since') or '' }}"></label>
       {% endif %}
-      {% if c.provider == 'edenred_it' %}
-      <label class="check"><input class="tg" type="checkbox" name="auto_apply" value="1" {{ 'checked' if c.config.get('auto_apply') }}>
-        <span><b style="font-weight:500">{{ _("Write movements without asking") }}</b><div class="muted">{{ _("The balance is always checked against Edenred. Notes and splits always ask for approval.") }}</div></span></label>
-      {% endif %}
       <div class="opts">{{ _("Sync") }}
         <select name="interval_hours">{% for h, t in intervals %}<option value="{{ h }}" {{ 'selected' if h == c.interval_hours }}>{{ _(t) }}</option>{% endfor %}</select>
         {{ _("Active") }} <input class="tg" type="checkbox" name="enabled" value="1" {{ 'checked' if c.enabled }}>

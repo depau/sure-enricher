@@ -1,6 +1,7 @@
-"""Meal-voucher movements (Edenred Ticket Restaurant Italia) -> planned Sure transactions.
+"""Wallet movements (Edenred meal vouchers, the Amazon gift card balance) -> planned Sure transactions.
 
-Providers hand over normalized VoucherMovements; nothing here talks to Edenred.
+Providers hand over normalized VoucherMovements; nothing here talks to a provider. The wallet's Sure account is the
+enricher's: its movements are created without asking.
 """
 
 import hashlib
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from spe import writer
 from spe.db import Connection, Evidence, SureOp, record_evidence
+from spe.sure import SureClient
 
 ROME = ZoneInfo("Europe/Rome")
 SURE_SOURCE = "sure-purchase-enricher:edenred-it"  # the project's first name: Sure dedupes on it, never change it
@@ -31,12 +33,13 @@ class Kind(StrEnum):
     REFUND = "refund"  # merchant reversal back into the wallet
     EXPIRY = "expiry"  # forfeited vouchers: not a purchase
     TRANSFER = "transfer"  # between supports of one pool (card <-> Cloud <-> smartphone): never written
+    TOPUP = "topup"  # balance added from outside (a gift card code, a reload paid by card); Sure pairs it with a card payment itself
     OTHER = "other"
 
 
 # Sure `nature` per kind. Kinds absent here are held: Sure's create API cannot set
 # `kind`/`excluded`, so an expiry or internal move would show up as shopping or income.
-NATURE = {Kind.ISSUANCE: "income", Kind.REDEMPTION: "expense", Kind.REFUND: "income"}
+NATURE = {Kind.ISSUANCE: "income", Kind.REDEMPTION: "expense", Kind.REFUND: "income", Kind.TOPUP: "income"}
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,9 @@ class VoucherMovement:
     kind: Kind
     description: str
     pending: bool = False
-    source_id: str | None = None  # Edenred's own immutable id, when it has one
+    source_id: str | None = None  # the source's own immutable id, when it has one
     occurred_at: datetime | None = None  # timezone-aware, when the source has a time
+    merchant: str | None = None  # the shop it was spent at: a family merchant in Sure, for rules
 
 
 @dataclass(frozen=True)
@@ -102,7 +106,8 @@ def external_ids(movements: list[VoucherMovement]) -> list[tuple[str, bool]]:
     return out
 
 
-def plan(movements: list[VoucherMovement], accounts: dict[str, str]) -> tuple[list[PlannedCreate], list[Held]]:
+def plan(movements: list[VoucherMovement], accounts: dict[str, str], source: str = SURE_SOURCE,
+         label: str = "Edenred Ticket Restaurant") -> tuple[list[PlannedCreate], list[Held]]:
     """accounts maps wallet -> Sure account UUID."""
     creates: dict[str, PlannedCreate] = {}
     held = []
@@ -128,28 +133,45 @@ def plan(movements: list[VoucherMovement], accounts: dict[str, str]) -> tuple[li
                     "currency": "EUR",
                     "nature": NATURE[m.kind],
                     "name": m.description,
-                    "notes": f"Edenred Ticket Restaurant ({m.kind})",
-                    "source": SURE_SOURCE,
+                    "notes": f"{label} ({m.kind})",
+                    "source": source,
                     "external_id": ext_id,
-                } | ({"merchant": shop} if m.kind != Kind.ISSUANCE and (shop := merchant_name(m.description)) else {}),
+                } | ({"merchant": m.merchant} if m.merchant else {}),
             )
     return list(creates.values()), held
 
 
-def stage(db: Session, conn: Connection, movements: list[VoucherMovement], accounts: dict[str, str], auto_apply: bool) -> str:
-    """Record movements as evidence of the connection and queue their Sure creates. Identical twins wait for approval."""
-    creates, held = plan(movements, accounts)
+def stage(db: Session, conn: Connection, movements: list[VoucherMovement], accounts: dict[str, str], source: str = SURE_SOURCE,
+          label: str = "Edenred Ticket Restaurant") -> str:
+    """Record movements as evidence of the connection and queue their Sure creates. The wallet account belongs to
+    the enricher, so new movements are written without asking; identical twins wait for approval."""
+    creates, held = plan(movements, accounts, source, label)
     db.execute(delete(Evidence).where(Evidence.connection_id == conn.id, Evidence.issue.startswith("pending")))
     for c in creates:
         record_evidence(db, conn, c.external_id, "voucher_movement", _jsonable(c.movement),
                         "identical twin: approve if both are real" if c.collision else None)
         m = c.movement
-        writer.stage_create(db, conn.provider, c.payload, f"{m.booked_on} {c.payload['nature']} {c.payload['amount']} EUR {m.description}",
-                            approve=auto_apply and not c.collision, user_id=conn.user_id)
+        op = writer.stage_create(db, conn.provider, c.payload, f"{m.booked_on} {c.payload['nature']} {c.payload['amount']} EUR {m.description}",
+                                 approve=not c.collision, user_id=conn.user_id)
+        if op.status == "planned" and not c.collision:
+            op.status = "approved"  # queued before wallet creates stopped asking
     for h in held:
         record_evidence(db, conn, h.key, "voucher_movement", _jsonable(h.movement), h.reason)
     db.commit()
     return f"{len(creates)} movements staged, {len(held)} held"
+
+
+def balance_mismatch(sure: SureClient, account_id: str | None, balance: Decimal, who: str) -> str | None:
+    """Compare the source's balance with the wallet account's in Sure; reported, never corrected."""
+    if not account_id:
+        return None
+    acct = next((a for a in sure.accounts() if a["id"] == account_id), None)
+    if acct is None:
+        return f"Sure account {account_id} not found"
+    in_sure = Decimal(acct["balance_cents"]) / 100
+    if in_sure != balance:
+        return f"{who} says €{balance}, Sure shows €{in_sure}: approve pending ops or fix the opening balance"
+    return None
 
 
 def merchant_name(description: str) -> str | None:

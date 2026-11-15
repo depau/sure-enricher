@@ -26,4 +26,4 @@ def test_one_checkout_paid_with_three_vouchers_is_one_movement():
         (Kind.OTHER, Decimal(8), date(2026, 11, 11)),  # unknown codes are held, never guessed
     ], key=str)
     assert len({m.source_id for m in normalize(rows)}) == 5
-    assert normalize(rows)[0].description == "ESSELUNGA - MILANO - CENTRO"
+    assert normalize(rows)[0].description == "ESSELUNGA - MILANO - CENTRO" and normalize(rows)[0].merchant == "Esselunga"

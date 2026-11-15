@@ -44,9 +44,6 @@ IT = {
     'Name': 'Nome',
     'account no longer visible in Sure': 'conto non più visibile in Sure',
     'Only plans opened from': 'Solo piani aperti dal',
-    'Write movements without asking': 'Scrivi i movimenti senza chiedere',
-    'The balance is always checked against Edenred. Notes and splits always ask for approval.':
-        "Il saldo viene sempre confrontato con Edenred. Note e divisioni chiedono sempre l'approvazione.",
     'Sync': 'Sincronizza',
     'Active': 'Attiva',
     'Remove connection': 'Rimuovi connessione',
@@ -95,6 +92,8 @@ IT = {
     'Other liability': 'Altra passività',
     'Voucher account in Sure': 'Conto dei buoni in Sure',
     'Choose the voucher account…': 'Scegli il conto dei buoni…',
+    'Gift card account in Sure': 'Conto dei buoni regalo in Sure',
+    'No gift card account': 'Nessun conto dei buoni regalo',
     'PayPal account in Sure': 'Conto PayPal in Sure',
     'Choose the PayPal account…': 'Scegli il conto PayPal…',
     'Loan that holds the instalment debt': 'Prestito che tiene il debito delle rate',
@@ -128,6 +127,12 @@ IT = {
         'Con questo saldo iniziale e i movimenti letti, il conto arriva a %(balance)s come su Edenred.',
     'Open Sure ↗': 'Apri Sure ↗',
     'Refresh list': 'Aggiorna elenco',
+    'Gift card balance on Amazon: %(balance)s. To follow it in Sure:': 'Saldo buoni regalo su Amazon: %(balance)s. Per seguirlo in Sure:',
+    '<b>New account → Bank Account</b>, name <b>Amazon buoni regalo</b>':
+        '<b>Nuovo conto → Conto bancario</b>, nome <b>Amazon buoni regalo</b>',
+    'Choose it above as the gift card account': 'Sceglilo qui sopra come conto dei buoni regalo',
+    "Every gift card movement is then written there without asking, and its balance is checked against Amazon's.":
+        "Ogni movimento dei buoni regalo viene poi scritto lì senza chiedere, e il saldo viene confrontato con quello di Amazon.",
     'No loan yet? In Sure:': "Il prestito non c'è ancora? In Sure:",
     '<b>New account → Loan</b>, name <b>PayPal Pay in 3</b>': '<b>Nuovo conto → Prestito</b>, nome <b>PayPal Paga in 3 rate</b>',
     'Balance on date <b>0</b>, opening balance date <b>today</b>': 'Saldo alla data <b>0</b>, data saldo iniziale <b>oggi</b>',
@@ -257,6 +262,8 @@ IT = {
     'transaction': 'transazione',
     'Create transaction “%(name)s” in %(account)s': 'Crea transazione «%(name)s» in %(account)s',
     'Link “%(name)s” of %(day)s (%(amount)s) to the loan': 'Collega «%(name)s» del %(day)s (%(amount)s) al prestito',
+    'Amazon gift card · new movement': 'Buoni regalo Amazon · nuovo movimento',
+    'gift card %(balance)s': 'buoni regalo %(balance)s',
     '%(merchant)s · order %(id)s': '%(merchant)s · ordine %(id)s',
     '%(merchant)s · receipt %(id)s': '%(merchant)s · scontrino %(id)s',
     'AliExpress · purchase of %(day)s': 'AliExpress · acquisto del %(day)s',
@@ -289,6 +296,7 @@ IT = {
     'Which transaction is the %(label)s payment?': 'Quale transazione è il pagamento %(label)s?',
     'Use this one': 'Usa questa',
     'Edenred · %(description)s': 'Edenred · %(description)s',
+    'Amazon gift card · %(description)s': 'Buoni regalo Amazon · %(description)s',
     '%(method)s %(amount)s: %(n)s possible transactions in Sure, choose the right one':
         '%(method)s %(amount)s: %(n)s transazioni possibili in Sure, scegli quella giusta',
     '%(method)s %(amount)s: no matching transaction in Sure, for now':

@@ -9,26 +9,42 @@ With the cookies of a signed-in browser:
   GET /cpe/yourpayments/transactions        __NEXT_DATA__ JSON: the 20 latest charges/refunds, each with
                                             date, amount, card, order number(s), Charge/Refund, status
   GET /your-orders/order-details?orderID=   order date and items (title, unit price, quantity)
+  GET /gc/balance[?next=<token>]            gift card balance (#gc-ui-balance-gc-balance-value) and its ledger
+                                            (#gc-balance-ledger-table), 15 rows a page, newest first: date, description
+                                            (+ order link, or a gift card's masked code and serial number), signed
+                                            amount, balance after it. No row id. Pages chain through "Successivo".
 One order = one purchase whose payment legs are its actual charges (shipments, installments, refunds), so the
 order total is never booked as an expense of its own. Items go into the notes; categories are left to the owner.
+Gift card payments are not on the payments page: the ledger is the only place they show up. Its rows are written
+to a wallet account in Sure (like Edenred's vouchers) and become gift card legs of the orders they paid.
+Ledger wordings seen (Italian, the account's language): "Buono Regalo applicato all'ordine" (spent on an order),
+"Rimborso dell'ordine" (refund, sometimes without the order), "Rilascio del saldo ... trattenuto dall'ordine"
+(a hold released), "Buono Regalo aggiunto" (a code redeemed), "Saldo Buoni Regalo aggiunto da Ricarica" (a reload,
+itself an order paid by card). Anything else is held, not guessed.
 ponytail: only the first page of 20 charges is read; with two syncs a day that is weeks of slack.
 """
 
+import hashlib
 import json
+import random
 import re
+import time
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from html import unescape
 from html.parser import HTMLParser
-from urllib.parse import urlsplit
+from itertools import pairwise
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from sqlalchemy import select
 
-from spe import loginbrowser, purchases, vault
+from spe import loginbrowser, purchases, vault, vouchers
 from spe.db import Evidence, record_evidence
-from spe.providers import Context, NeedsAuth, register
-from spe.purchases import Line, Payment, Purchase
+from spe.providers import Blocked, Context, NeedsAuth, register
+from spe.purchases import GIFT_CARD, Line, Payment, Purchase
+from spe.vouchers import ROME, Kind, VoucherMovement
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
 WWW = "https://www.amazon.it"
@@ -44,6 +60,12 @@ MONTH_NAMES = [
 MONTHS = {name: i for line in MONTH_NAMES for i, name in enumerate(line.split(), 1)}
 ORDER_ID = re.compile(r"\d{3}-\d{7}-\d{7}")
 PRICE = re.compile(r"\d[\d.,\s\u00a0\u202f]*[.,]\d{2}")
+GC_WALLET = "amazon_gift_card"
+GC_SOURCE = "sure-purchase-enricher:amazon-gift-card"  # Sure dedupes on it: never change it
+GC_LABEL = "Amazon gift card"
+GC_LOOKBACK = timedelta(days=21)  # late or reordered ledger rows: re-read three weeks before the last read
+GC_ORDERS = timedelta(days=60)  # gift card legs are added to orders this recent; older ones only get their movement
+PAGE_DELAY = 5.0  # seconds (±jitter) between ledger pages: a first read walks the whole history, and Amazon throttles
 
 
 def store_date(s: str) -> date:
@@ -143,6 +165,12 @@ class AmazonClient:
 
     def get(self, path: str, **params: str) -> str:
         r = self.http.get(WWW + path, params=params)
+        if r.status_code == 503:  # a lone one now and then: wait and try once more
+            time.sleep(PAGE_DELAY * random.uniform(2, 4))
+            r = self.http.get(WWW + path, params=params)
+        if r.status_code == 503:
+            # Amazon's "Ci dispiace" page: it throttles this session (seen after ~60 page reads in a few minutes).
+            raise Blocked("Amazon is throttling requests (503): trying again at the next scheduled sync")
         if "/ap/signin" in str(r.url):
             raise NeedsAuth("Amazon asks to sign in again: reconnect from Connessioni")
         r.raise_for_status()
@@ -154,7 +182,80 @@ def store_name(host: str | None) -> str:
     return "Amazon." + (host or "www.amazon.it").removeprefix("www.").removeprefix("amazon.")
 
 
-def build_purchases(txs: list[dict], orders: dict[str, dict]) -> tuple[list[Purchase], list[tuple[str, str]]]:
+def _text(fragment: str) -> str:
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+def signed(s: str) -> Decimal:
+    """'-12,34 €' -> -12.34, '5,00 €' -> 5.00."""
+    return -amount(s) if s.lstrip().startswith(("-", "\u2212")) else amount(s)
+
+
+def parse_gift_card(page: str) -> tuple[Decimal, list[dict], str | None]:
+    """The balance, the ledger rows of this page (newest first) and the token of the next, older page."""
+    bal = re.search(r'id="gc-ui-balance-gc-balance-value"[^>]*>(.*?)</span>', page, re.S)
+    table = re.search(r'id="gc-balance-ledger-table".*?</table>', page, re.S)
+    if not bal or not table:
+        raise RuntimeError("Amazon gift card page without balance or ledger: layout changed, nothing written")
+    rows = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table[0], re.S):
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+        if not cells:
+            continue  # the header row
+        if len(cells) != 4:
+            raise RuntimeError(f"Amazon gift card ledger row with {len(cells)} cells: layout changed, nothing written")
+        order = re.search(r"orderID=([\w-]+)", cells[1])
+        serial = None if order else re.search(r"(\d{8,})\D*$", _text(cells[1]))
+        rows.append({"date": store_date(_text(cells[0])), "label": _text(cells[1].split("<br", 1)[0]),
+                     "order": order[1] if order else None, "serial": serial[1] if serial else None,
+                     "amount": signed(_text(cells[2])), "closing": signed(_text(cells[3]))})
+    nav = re.search(r'id="gc-balance-ledger-pagination".*?</nav>', page, re.S)
+    nxt = re.search(r'<li class="a-last"><a href="([^"]+)"', nav[0]) if nav else None
+    token = parse_qs(urlsplit(unescape(nxt[1])).query).get("next", [None])[0] if nxt else None
+    return signed(_text(bal[1])), rows, token
+
+
+def read_gift_card(client: AmazonClient, since: date | None) -> tuple[Decimal, list[dict], bool]:
+    """Balance and ledger rows down to `since` (every row of that day included; None: the whole history), and
+    whether the whole history was read. Refuses a ledger whose running balance doesn't add up: a page was missed
+    or misread, and writing it would put a wrong balance into Sure."""
+    balance, rows, token = parse_gift_card(client.get("/gc/balance"))
+    while token and (since is None or (rows and rows[-1]["date"] >= since)):
+        time.sleep(PAGE_DELAY * random.uniform(0.8, 1.2))
+        _, more, token = parse_gift_card(client.get("/gc/balance", next=token))
+        rows += more
+    if rows and rows[0]["closing"] != balance:
+        raise RuntimeError(f"Amazon gift card balance €{balance} but its last ledger row ends at €{rows[0]['closing']}: nothing written")
+    for newer, older in pairwise(rows):
+        if newer["closing"] != older["closing"] + newer["amount"]:
+            raise RuntimeError(f"Amazon gift card ledger does not add up on {newer['date']}: nothing written")
+    return balance, rows, token is None
+
+
+def gift_card_movements(rows: list[dict]) -> list[VoucherMovement]:
+    """One movement per ledger row, in the ledger's order (the dedupe keys of identical rows depend on it)."""
+    out = []
+    for r in rows:
+        if r["amount"] < 0:
+            kind = Kind.REDEMPTION if r["order"] else Kind.OTHER
+        elif r["serial"] or "Ricarica" in r["label"]:
+            kind = Kind.TOPUP
+        elif r["label"].startswith(("Rimborso", "Rilascio")):
+            kind = Kind.REFUND
+        else:
+            kind = Kind.OTHER
+        out.append(VoucherMovement(
+            wallet=GC_WALLET, booked_on=r["date"], amount=abs(r["amount"]), kind=kind,
+            description=f"{r['label']} {r['order']}" if r["order"] else r["label"],
+            # the serial number identifies a redeemed card for good; hashed, it is no use to anyone else
+            source_id=hashlib.sha256(r["serial"].encode()).hexdigest()[:24] if r["serial"] else None,
+            merchant="Amazon" if kind in (Kind.REDEMPTION, Kind.REFUND) else None,
+        ))
+    return out
+
+
+def build_purchases(txs: list[dict], orders: dict[str, dict], gift: list[dict] = ()) -> tuple[list[Purchase], list[tuple[str, str]]]:
+    """gift: gift card ledger rows of orders, in the charges' shape plus "method": the order's gift card legs."""
     by_order: dict[str, list[dict]] = defaultdict(list)
     held = []
     for t in txs:
@@ -168,13 +269,16 @@ def build_purchases(txs: list[dict], orders: dict[str, dict]) -> tuple[list[Purc
             held.append((t["orders"][0], f"one charge of €{t['amount']} covers {len(t['orders'])} orders: not split automatically"))
             continue
         by_order[t["orders"][0]].append(t)
+    for g in gift:
+        by_order[g["orders"][0]].append(g)
     out = []
     for oid, ts in by_order.items():
         o = orders.get(oid) or {"date": None, "items": []}
-        pays = tuple(Payment("card", t["amount"] if t["kind"] == "Charge" else -t["amount"], on=t["date"])
+        pays = tuple(Payment(t.get("method", "card"), t["amount"] if t["kind"] == "Charge" else -t["amount"], on=t["date"])
                      for t in sorted(ts, key=lambda t: t["date"]))
+        store = next((t["store"] for t in ts if t.get("store")), None)
         out.append(Purchase(
-            provider="amazon_it", id=oid, merchant=store_name(ts[0]["store"]), date=o["date"] or min(t["date"] for t in ts),
+            provider="amazon_it", id=oid, merchant=store_name(store), date=o["date"] or min(t["date"] for t in ts),
             total=sum((p.amount for p in pays), Decimal(0)), payments=pays,
             lines=tuple(Line(title, price) for title, price in o["items"]), keywords=("AMAZON", "AMZN"),
         ))
@@ -201,29 +305,68 @@ class AmazonEU:
         if not session:
             raise NeedsAuth("not connected: sign in to amazon.it from Connessioni")
         client = AmazonClient(session["cookies"])
+        cfg = ctx.state.config or {}
         try:
             listed = parse_transactions(client.get("/cpe/yourpayments/transactions"))
+            gc_summary, gift, reloads = self._gift_card(ctx, client, cfg.get("gift_card_account"))
             # another connection of the user (the same account added twice) already has it: never twice
             elsewhere = set(ctx.db.scalars(select(Evidence.key).where(Evidence.user_id == ctx.state.user_id,
                                                                       Evidence.connection_id != ctx.state.id)))
-            txs = [t for t in listed if not elsewhere.intersection(t["orders"])]
-            current = {o for t in txs for o in t["orders"]}
+            # a reload of the gift card balance is a transfer from the card, not a purchase
+            txs = [t for t in listed if not elsewhere.intersection(t["orders"]) and not reloads.intersection(t["orders"])]
+            gift = [g for g in gift if g["orders"][0] not in elsewhere]
+            current = {o for t in [*txs, *gift] for o in t["orders"]}
             known = {k: v for k, v in ctx.state.cursor.get("orders", {}).items() if k in current}  # details, fetched once
             for oid in current - known.keys():
+                time.sleep(PAGE_DELAY * random.uniform(0.8, 1.2))  # a first read fetches dozens: Amazon throttles bursts
                 o = parse_order(client.get("/your-orders/order-details", orderID=oid))
                 known[oid] = {"date": o["date"].isoformat() if o["date"] else None, "items": [[t, str(p)] for t, p in o["items"]]}
+                ctx.state.cursor = {**ctx.state.cursor, "orders": known}  # kept if Amazon cuts the read short (throttling)
             ctx.state.cursor = {**ctx.state.cursor, "orders": known}
             orders = {k: {"date": date.fromisoformat(v["date"]) if v["date"] else None,
                           "items": [(t, Decimal(p)) for t, p in v["items"]]} for k, v in known.items()}
-            ps, held = build_purchases(txs, orders)
+            ps, held = build_purchases(txs, orders, gift)
             for p in ps:
                 purchases.record(ctx.db, ctx.state, p)
             for oid, why in held:
                 record_evidence(ctx.db, ctx.state, oid, "purchase", {"id": oid}, why)
-            return f"{len(txs)} charges, {len(ps)} orders, {len(held)} held"
+            return f"{len(txs)} charges, {len(ps)} orders, {len(held)} held; {gc_summary}"
         finally:
             ctx.state.session = vault.seal(secret, {"cookies": client.cookies()})
             ctx.db.commit()
+
+    def _gift_card(self, ctx: Context, client: AmazonClient, account: str | None) -> tuple[str, list[dict], set[str]]:
+        """Read the gift card ledger; with a wallet account chosen, write its movements there and hand back the
+        orders' gift card legs and the orders that were balance reloads."""
+        gc = dict(ctx.state.cursor.get("gift_card") or {})
+        today = datetime.now(ROME).date()
+        if account:
+            since = date.fromisoformat(gc["read_on"]) - GC_LOOKBACK if gc.get("read_on") else None
+        else:
+            since = today if "opening" in gc else None  # read whole once, for the opening balance shown in Connections
+        balance, rows, complete = read_gift_card(client, since)
+        gc["balance"] = str(balance)
+        if complete:
+            first = rows[-1] if rows else None
+            gc["opening"] = [str(first["closing"] - first["amount"]) if first else str(balance),
+                             (first["date"] - timedelta(days=1) if first else today).isoformat()]
+        if not account:
+            ctx.state.cursor = {**ctx.state.cursor, "gift_card": gc}
+            return f"gift card €{balance}, no account chosen", [], set()
+        rows = [r for r in rows if since is None or r["date"] >= since]  # whole days only: twins keep their order
+        moves = gift_card_movements(rows)
+        summary = vouchers.stage(ctx.db, ctx.state, moves, {GC_WALLET: account}, GC_SOURCE, GC_LABEL)
+        gc["read_on"] = today.isoformat()
+        ctx.state.cursor = {**ctx.state.cursor, "gift_card": gc}
+        gift = [{"date": r["date"], "amount": m.amount, "kind": "Charge" if r["amount"] < 0 else "Refund", "orders": [r["order"]],
+                 "store": None, "method": GIFT_CARD}
+                for r, m in zip(rows, moves, strict=True)
+                if m.kind in (Kind.REDEMPTION, Kind.REFUND) and r["order"] and ORDER_ID.fullmatch(r["order"]) and r["date"] >= today - GC_ORDERS]
+        reloads = {r["order"] for r, m in zip(rows, moves, strict=True) if m.kind == Kind.TOPUP and r["order"]}
+        mismatch = vouchers.balance_mismatch(ctx.sure, account, balance, "Amazon gift card")
+        if mismatch:
+            ctx.state.status = "degraded"
+        return f"gift card: {summary}; " + (mismatch or f"balance €{balance}"), gift, reloads
 
 
 register(AmazonEU())

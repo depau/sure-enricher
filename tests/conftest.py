@@ -47,6 +47,12 @@ class FakeSure:
             self.posts += req.method == "POST"
             status, self.fail_next = self.fail_next, None
             return httpx.Response(status, json={"error": "boom", "message": "x"})
+        if parts == ["accounts"]:  # balance: what the rows add up to (opening 0; split parents count through their children)
+            ids = sorted({r["account"]["id"] for r in self.rows})
+            accounts = [{"id": a, "name": a, "account_type": "depository",
+                         "balance_cents": int(-sum(Decimal(r["amount_decimal"]) for r in self.rows if r["account"]["id"] == a and not r["split_parent"]) * 100)}
+                        for a in ids]
+            return httpx.Response(200, json={"accounts": accounts, "pagination": {"page": 1, "total_pages": 1}})
         if parts == ["sync"]:
             self.family_syncs += 1
             return httpx.Response(202, json={})
