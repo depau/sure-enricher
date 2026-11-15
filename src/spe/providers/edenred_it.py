@@ -184,7 +184,7 @@ class EdenredIT:
         accounts = {WALLET: cfg["account_id"]} if cfg.get("account_id") else {}
         summary = vouchers.stage(ctx.db, ctx.state, normalize(rows), accounts)
         ctx.state.cursor = {**ctx.state.cursor, "last_success": today.isoformat(), "balance": str(balance)}
-        mismatch = vouchers.balance_mismatch(ctx.sure, cfg.get("account_id"), balance, "Edenred")
+        mismatch = vouchers.balance_mismatch(ctx.db, ctx.sure, cfg.get("account_id"), balance, "Edenred")
         if mismatch:
             ctx.state.status = "degraded"
             return f"{summary}; {mismatch}"

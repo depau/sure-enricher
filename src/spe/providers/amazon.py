@@ -363,7 +363,7 @@ class AmazonEU:
                 for r, m in zip(rows, moves, strict=True)
                 if m.kind in (Kind.REDEMPTION, Kind.REFUND) and r["order"] and ORDER_ID.fullmatch(r["order"]) and r["date"] >= today - GC_ORDERS]
         reloads = {r["order"] for r, m in zip(rows, moves, strict=True) if m.kind == Kind.TOPUP and r["order"]}
-        mismatch = vouchers.balance_mismatch(ctx.sure, account, balance, "Amazon gift card")
+        mismatch = vouchers.balance_mismatch(ctx.db, ctx.sure, account, balance, "Amazon gift card")
         if mismatch:
             ctx.state.status = "degraded"
         return f"gift card: {summary}; " + (mismatch or f"balance €{balance}"), gift, reloads

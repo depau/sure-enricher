@@ -161,16 +161,21 @@ def stage(db: Session, conn: Connection, movements: list[VoucherMovement], accou
     return f"{len(creates)} movements staged, {len(held)} held"
 
 
-def balance_mismatch(sure: SureClient, account_id: str | None, balance: Decimal, who: str) -> str | None:
-    """Compare the source's balance with the wallet account's in Sure; reported, never corrected."""
+def balance_mismatch(db: Session, sure: SureClient, account_id: str | None, balance: Decimal, who: str) -> str | None:
+    """Compare the source's balance with the wallet account's in Sure, counting the creates still queued for it:
+    this runs before the sync's own movements are sent (spe.scheduler). Reported, never corrected."""
     if not account_id:
         return None
     acct = next((a for a in sure.accounts() if a["id"] == account_id), None)
     if acct is None:
         return f"Sure account {account_id} not found"
     in_sure = Decimal(acct["balance_cents"]) / 100
-    if in_sure != balance:
-        return f"{who} says €{balance}, Sure shows €{in_sure}: approve pending ops or fix the opening balance"
+    queued = db.scalars(select(SureOp.payload).where(SureOp.kind == "create", SureOp.account_id == account_id,
+                                                     SureOp.status.in_(("planned", "approved", "sending")))).all()
+    expected = in_sure + sum((Decimal(p["amount"]) * (1 if p["nature"] == "income" else -1) for p in queued), Decimal(0))
+    if expected != balance:
+        return f"{who} says €{balance}, Sure shows €{in_sure}" + (f" (€{expected} with the movements still to write)" if queued else "") \
+            + ": approve pending ops or fix the opening balance"
     return None
 
 

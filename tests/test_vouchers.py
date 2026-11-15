@@ -140,3 +140,14 @@ def test_voucher_spending_gets_the_shop_as_merchant_and_older_rows_get_it_on_app
     assert writer.apply(db, sure.client(), 1) == {"updated": 1, "failed": 1}
     assert by_name["ESSELUNGA - MILANO - CENTRO"]["merchant"]["name"] == "Esselunga"
     assert by_name["TO MARKET - MILANO"]["merchant"] == sure.merchants[0]  # chosen in Sure: left as is
+
+
+def test_balance_check_counts_the_movements_this_sync_is_about_to_write(db):
+    sure = FakeSure()
+    sure.add(ACCOUNT, "2026-11-01", "-80.00", "Ordine di BUONI/VOUCHER su CLOUD")  # Sure: €80
+    lunch = VoucherMovement("card", date(2026, 11, 14), Decimal("64.00"), Kind.REDEMPTION, "ESSELUNGA - MILANO", source_id="E2")
+    vouchers.stage(db, edenred(db), [lunch], ACCOUNTS)  # queued, sent after the provider's sync in the same tick
+    assert vouchers.balance_mismatch(db, sure.client(), ACCOUNT, Decimal("16.00"), "Edenred") is None
+    assert "Sure shows €80" in vouchers.balance_mismatch(db, sure.client(), ACCOUNT, Decimal("20.00"), "Edenred")
+    writer.apply(db, sure.client(), 1)
+    assert vouchers.balance_mismatch(db, sure.client(), ACCOUNT, Decimal("16.00"), "Edenred") is None
